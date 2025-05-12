@@ -32,3 +32,4 @@ class Qlearn(MDP()):
 
 qlearn = Qlearn(env=maze(), α=.5, episodes=50, seed=1, **demoR()).interact()
 ```
+The framework also provides support for robotics and extensive examples that cover most of Sutton and Barto's RL book!
