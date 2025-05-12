@@ -5,6 +5,7 @@ from rl.rl import *
 
 # prediction algorithm example and application
 
+```
 class TD(MRP):
 
     # ----------------------------- 🌖 online learning ----------------------    
@@ -14,13 +15,13 @@ class TD(MRP):
 
 
 TDwalk = TD(episodes=100, v0=.5, **demoV()).interact(label='TD learning')
-
+```
 
 
 
 
 # control algorithm example and application
-
+```
 class Qlearn(MDP()):
 
     #--------------------------------------🌖 online learning --------------------------------------
@@ -30,3 +31,4 @@ class Qlearn(MDP()):
 
 
 qlearn = Qlearn(env=maze(), α=.5, episodes=50, seed=1, **demoR()).interact()
+```
