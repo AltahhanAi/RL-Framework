@@ -1,5 +1,5 @@
-This is a full framework for Reinforcement Learning that allows a developer to develop algorithms in straightforward manner.
-The developer needs to download the env and rl folders and then to create a TD class, once can do something like:
+This is a full framework for Reinforcement Learning that allows a developer to develop algorithms in a straightforward manner.
+The developer needs to download the env and rl folders and then create a TD or Qlearn classes, one can do something like:
 
 from rl.rl import *
 
