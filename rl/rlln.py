@@ -1,3 +1,14 @@
+
+
+'''
+   Author: Abdulrahman Altahhan, 2025.
+   version: 3.2
+
+    This library of functionality in RL that aims for simplicity and general insight into how algorithms work, these libraries 
+    are written from scratch using standard Python libraries (numpy, matplotlib etc.).
+    Please note that you will need permission from the author to use the code for research, commercially or otherwise.
+'''
+
 '''
     this library implement a *linear function approximation* for well-known 
     RL algorithms. It works by inheriting from the classes in the 
@@ -132,7 +143,8 @@ class vMDP(MDP(vMRP)):
         self.Q = self.Q_
 
     def Q_(self, s=None, a=None):
-        #print(s.shape)
+        # print('rlln, s', s)
+        # print(s.shape)
         W = self.W if a is None else self.W[a]
         return W.dot(s) if s is not None else np.matmul(W, self.env.S_()).T 
 

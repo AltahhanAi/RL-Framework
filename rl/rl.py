@@ -1,6 +1,16 @@
 
 '''
-   This is a full-fledged RL library. The assumption is a tabular representation.
+   Author: Abdulrahman Altahhan, 2025.
+   version: 3.3
+
+    This library of functionality in RL that aims for simplicity and general insight into how algorithms work, these libraries 
+    are written from scratch using standard Python libraries (numpy, matplotlib etc.).
+    Please note that you will need permission from the author to use the code for research, commercially or otherwise.
+'''
+
+
+'''
+    This is a full-fledged RL library. The assumption is a tabular representation.
     However, these classes can be easily extended to linear and non-linear function
     approximation as we shall see in other libraries.
     
@@ -29,16 +39,18 @@
 from env.grid import *
 from rl.rlselect import *
 from rl.dp import *
+import pickle
+from pathlib import Path
 # ==============================================Base class for prediction =============================================
 '''
     all other classes will inherit from this class.
 '''
 class MRP:
     
-    def __init__(self, env=randwalk(), γ=1, α=.1, v0=0, episodes=100, view=1, 
+    def __init__(self, env=randwalk(), γ=1, α=.1, v0=0, episodes=100, view=1,
                  store=False, # Majority of methods are pure one-step online and no need to store episodes trajectories 
-                 max_t=2000, seed=None, visual=False, underhood='', 
-                 last=10, print_=False):
+                 max_t=2000, seed=None, visual=False, underhood='',
+                 last=10, print_=False, self_path='experiment.pkl'):
         # hyper parameters
         self.env = env
         self.γ = γ
@@ -51,7 +63,8 @@ class MRP:
         self.view = view
         self.underhood = underhood
         self.last = last
-        self.print = print_
+        self.print_ = print_
+        self.self_path = self_path  # path and name of the pickle file
         
         # reference to two important functions
         self.policy = self.stationary
@@ -66,19 +79,19 @@ class MRP:
         # useful to repeate the same experiement
         self.seed(seed)
         # to protect interact() in case of no training 
-        self.ep = -1 
+        self.ep = -1
         
     # set up important metrics
     def init_metrics(self):
         self.Ts = np.zeros(self.episodes, dtype=np.uint32)
         self.Rs = np.zeros(self.episodes)
-        self.Es = np.zeros(self.episodes)  
+        self.Es = np.zeros(self.episodes)
     
     def extend_metrics(self):
         if len(self.Ts)>=self.episodes: return # no need to resize if size is still sufficient
-        self.Ts.resize(self.episodes, refcheck=False)
-        self.Rs.resize(self.episodes, refcheck=False)
-        self.Es.resize(self.episodes, refcheck=False)
+        self.Ts = np.resize(self.Ts, self.episodes)
+        self.Rs = np.resize(self.Rs, self.episodes)
+        self.Es = np.resize(self.Es, self.episodes)
         
     # set up the V table
     def init_(self):
@@ -116,7 +129,7 @@ class MRP:
         if self.stop_early(): print('experience stopped at episode %d'%self.ep); return True
         return self.ep >= self.episodes - 1
 
-    #----------------------------------- 🐾steps as per the algorithm style --------------------------------
+    #----------------------------------- steps as per the algorithm style --------------------------------
     def step_0(self):
         s = self.env.reset()                                 # set env/agent to the start position
         a = self.policy(s)
@@ -127,39 +140,42 @@ class MRP:
         if self.skipstep: return 0, None, None, None, True
         a = self.policy(s)
         sn, rn, done, _ = self.env.step(a)
-        
+
         # we added s=s for compatibility with deep learning
         self.store_(s=s, a=a, rn=rn, sn=sn, done=done, t=t)
-        
+
         # None is returned for compatibility with other algorithms
         return rn,sn, a,None, done
-    
+
     # accomodates Sarsa style algorithms
     def step_an(self, s,a, t):                          
         if self.skipstep: return 0, None, None, None, True
         sn, rn, done, _ = self.env.step(a)
         an = self.policy(sn)
-        
+
         # we added s=s for compatibility with deep learning later
         self.store_(s=s, a=a, rn=rn, sn=sn, an=an, done=done, t=t)
         return rn,sn, a,an, done
-    
-    #------------------------------------ 🌖 online learning and interaction --------------------------------
-    def interact(self, train=True, resume=False, episodes=0, grid_img=False, **kw):
-        if episodes: self.episodes=episodes
+
+    #------------------------------------  online learning and interaction --------------------------------
+    def interact(self, train=True, resume=False, save_ep=False, 
+                 overwrite=False, episodes=None, env=None, **kw):
+        if episodes is not None: self.episodes=episodes
+        if env is not None: self.env = env
         if train and not resume: # train from scratch or resume training
             self.init_()
             self.init()                                        # user defined init() before all episodes
             self.init_metrics()
             self.allocate()
+            self.selfsave(overwrite) if save_ep else None
             self.plot0()                                       # useful to see initial V values
             self.seed(**kw)
-            self.ep = -1 #+ (not train)*(self.episodes-1)
+            self.ep = -1  #+ (not train)*(self.episodes-1)
             self.t_ = 0                                        # steps counter for all episodes
-        if resume: 
+        if resume:
             self.extend_metrics()
         # try:
-        #for self.ep in range(self.episodes):
+            #for self.ep in range(self.episodes):
         while not self.stop_exp():
             self.ep += 1
             self.t  = -1                                    # steps counter for curr episode
@@ -191,31 +207,43 @@ class MRP:
             self.metrics()
             self.offline() if train else None
             self.plot_ep()
-                    
-        # except: print('training was interrupted.......!'); plt.pause(3)
-    
-        # plot experience   
-        self.plot_exp(**kw)
-        
-        return self  
-    #------------------------------------- policies types 🧠-----------------------------------
-        
+            self.selfsave(overwrite) if save_ep else None  # saves object in a pickle file for retrieval in case of crash
+            self.env.stop() if hasattr(self.env, 'stop') else None
+
+        # except:
+        # print(f"Either learning interrupted or an error occurred:, at state {s}")
+        # try: self.env.stop()
+        # finally: pass
+        # finally:
+            # plot experience   
+            # self.plot_exp(**kw)
+        return self
+    # ------------------------------------- policies types 易-----------------------------------
+
     def stationary(self, *args):
         #return choice(self.As, 1, p=self.pAs)[0] # this gives better experiements quality but is less efficient
         return choices(self.As, weights=self.pAs, k=1)[0] if self.env.nA!=2 else np.random.binomial(1, 0.5)
     
-    #---------------------------------------perfromance metrics📏 ------------------------------
+    #---------------------------------------perfromance metrics ------------------------------
     def metrics(self):
         # we use %self.episodes so that when we use a different criterion to stop_exp() code will run
         self.Ts[self.ep%self.episodes] = self.t+1
         self.Rs[self.ep%self.episodes] = self.Σr
         self.Es[self.ep%self.episodes] = self.Error()
         
-        if self.print: print(self)
+        if self.print_: print(self)
+    
+    # retruns indexes of last n elements that spans two edges of an array, i is current index
+    # also it retruns the element of current index
+    def circular_n(self, A, i, n):
+        N = len(A)
+        i, n, inds = i%N, min(i+1, n), np.ones(N, dtype=bool)              
+        inds[i+1: N+1 - (n-i)] = False  # turn off indexes that we do not want, to deal with circular indexes
+        return A[inds][-n:], A[i]
     
     def __str__(self):
         # mean works regardless of where we stored the episode metrics (we use %self.episodes)     
-        Rs, R = circular_n(self.Rs, self.ep, self.last) # this function is defined above
+        Rs, R = self.circular_n(self.Rs, self.ep, self.last) # this function is defined above
         metrics = 'step %d, episode %d, r %.2f, mean r last %d ep %.2f, ε %.2f'
         values = (self.t_, self.ep, R, self.last, Rs.mean().round(2), round(self.ε, 2))
         return metrics%values
@@ -241,6 +269,29 @@ class MRP:
         pass
     def online(self,*args):
         pass
+    
+    # infrastructure for saving an object, useful for long experiments that can crash
+    def selfsave(self, overwrite):
+        env = self.env
+        self.env = None # execlude the env as it will cause issues when dealing with ros
+        if Path(self.self_path).exists() and not overwrite:
+            print(f"Warning: {self.self_path} already exists and you set overwrite the pickl to False, so we are existing.")
+            return
+        try:
+            with open(self.self_path, "wb") as f: pickle.dump(self, f)
+            # print(f"Object saved to {self.self_path}")
+        except: print(f'could not save the file {self.self_path}')
+        finally: self.env = env
+        
+    @classmethod
+    def selfload(cls, self_path=None):
+        if self_path is None: self_path = cls.self_path# use default path if it was not provide 
+        try:
+            with open(self_path, "rb") as f: obj = pickle.load(f)
+            print(f"Object restored from {self_path}")
+        except: print(f'could not load the file {self_path}')
+        return obj
+    
     #---------------------------------------visualise ✍️----------------------------------------
     # overload the env render function
     def render(self, rn=None, label='', **kw):
@@ -250,8 +301,6 @@ class MRP:
                         label=label+' reward=%d, t=%d, ep=%d'%(rn, self.t+1, self.ep+1), 
                         underhood=self.underhood, 
                         **kw)
-
-
 
 # -----------------------------random walk visualisation convenience extension ---------------------------
 '''
@@ -274,7 +323,7 @@ class MRP(MRP):
         
         nS = self.env.nS
         self.Vstar = Vstar if Vstar is not None else self.env.Vstar
-    #------------------------------------------- metrics📏 -----------------------------------------------  
+    #------------------------------------------- metrics -----------------------------------------------  
     # returns RMSE but can be overloaded if necessary
     # when Vstar=0, it shows how V is evolving via training 
     def Error(self):
@@ -340,17 +389,25 @@ class MRP(MRP):
         plt.gca().spines['top'].set_visible(False)
         
 
-# --------------------------------------- Multi-step 🐾 MRP-------------------------------------------
+# --------------------------------------- Multi-step  MRP-------------------------------------------
+
 '''
+
+    We develop our MRP class to accommodate waiting for n-1 steps before obtaining the $G_{t:t+n}$. 
+    This is necessary to be able to implement algorithms that incorporate n-steps rewards instead 
+    of the latest rewards. In each step, we must also create a G function to obtain the $G_{t:t+n}$.
+    Finally, we would need to alter our stopping criteria to wait for extra n-1 steps at the end 
+    to ensure we update the latest n-1 state values since we are always lagging n-1 steps during 
+    the episode.
     all other *prediction algorithms* must inherit this class
 '''
 class MRP(MRP):
     def __init__(self, n=1, **kw):
         super().__init__(**kw)
         self.n = n
-    #----------------------------------- 🐾steps as per the algorithm style --------------------------
+    #----------------------------------- steps as per the algorithm style --------------------------
     def stop_ep(self, done):
-        return self.stop_(done) or (self.t+1 >= self.max_t-1 and self.store)
+        return self.stop_(done) or (self.t+1 >= self.max_t-1)
 
     def stop_(self,done):
         if done:
@@ -362,7 +419,7 @@ class MRP(MRP):
             return False
         self.skipstep = 0
         return False
-    #-----------------------------------💰 returns --------------------------------------------------
+    #----------------------------------- returns --------------------------------------------------
     def G(self, τ1, τn):    # n-steps return, called during an episode
         #if self.γ==1: return self.r[τ1:τn+1].sum() # this saves computation when no dsicount is applied
         Gn = 0
@@ -403,7 +460,7 @@ def MDP(MRP=MRP):
             super().init_() # initialises V
             self.Q = np.ones((self.env.nS, self.env.nA))*self.q0
         
-        #------------------------------------- add some more policies types 🧠-------------------------------
+        #------------------------------------- add some more policies types 易-------------------------------
         # useful for inheritance, gives us a vector of actions values
         def Q_(self, s=None, a=None):
             return self.Q[s] if s is not None else self.Q
@@ -461,7 +518,7 @@ def MDP(MRP=MRP):
                             underhood=self.underhood, **kw)
     return MDP
 
-# =============================Basic policy gradient 🧠 class for control===================================
+# =============================Basic policy gradient 易 class for control===================================
 
 '''
     all other *policy gradient control algorithms* must inherit this class
@@ -481,7 +538,7 @@ def PG(MDP=MDP(MRP)):
             # softmax is the default policy selection procedure for Policy Gradient methods
             self.policy = self.τsoftmax
 
-        #----------------------------------- add some more policies types 🧠-------------------------------
+        #----------------------------------- add some more policies types 易-------------------------------
         # returns a softmax action
         def τsoftmax(self, s):
             Qs = self.Q_(s)
@@ -528,7 +585,7 @@ def demoGame(): return demo('Game')
     offline here in the sense of end-of-episode learning, 
     not a pure offline where there is no inbetween episodes interaction
 '''
-# ------------------ 🌘 offline Monte Carlo value function prediction learning -----------------------
+# ------------------  offline Monte Carlo value function prediction learning -----------------------
 class MC(MRP):
     def init(self):
         self.store = True
@@ -543,7 +600,7 @@ class MC(MRP):
             Gt = self.γ*Gt + rn
             self.V[s] += self.α*(Gt - self.V[s])
 
-# ------------------- 🌘 offline Monte Carlo value function control learning 🧑🏻‍🏫 -----------------------
+# -------------------  offline Monte Carlo value function control learning 六‍ -----------------------
 class MCC(MDP()):
     def init(self):
         self.store = True
@@ -559,7 +616,7 @@ class MCC(MDP()):
             Gt = self.γ*Gt + rn
             self.Q[s,a] += self.α*(Gt - self.Q[s,a])
 
-# ------------------- 🌘 offline, REINFORCE: MC for policy gradient 🧠 control methdos ----------------
+# -------------------  offline, REINFORCE: MC for policy gradient 易 control methdos ----------------
 class REINFORCE(PG()):
     def init(self):
         self.store = True
@@ -582,12 +639,12 @@ class REINFORCE(PG()):
             γt /= γ
 
 
-# -------------------- 🌖 online Temporal Difference: value prediction learning ------------------------
+# --------------------  online Temporal Difference: value prediction learning ------------------------
 class TD(MRP):  
     def online(self, s, rn,sn, done, *args): 
         self.V[s] += self.α*(rn + (1- done)*self.γ*self.V[sn] - self.V[s])
 
-# -------------------- 🌘 offline Temporal Difference(TD): value prediction learning ----------------------
+# --------------------  offline Temporal Difference(TD): value prediction learning ----------------------
 class TDf(MRP):
     def init(self):
         self.store = True
@@ -602,7 +659,7 @@ class TDf(MRP):
             
             self.V[s] += self.α*(rn + (1- done)*self.γ*self.V[sn]- self.V[s])
 
-# -------------------- 🌖 online multi-step TD: value prediction learning ---------------------------------
+# --------------------  online multi-step TD: value prediction learning ---------------------------------
 class TDn(MRP):
     def init(self):
         self.store = True # there is a way to save storage by using t%(self.n+1) but we left it for clarity
@@ -622,7 +679,7 @@ class TDn(MRP):
         # n steps τ+1,..., τ+n inclusive of both ends
         self.V[sτ] += self.α*(self.G(τ1,τn) + (1- done)*self.γ**n *self.V[sn] - self.V[sτ])
     
-# -------------------- 🌘 offline multi-step TD: value prediction learning ---------------------------
+# --------------------  offline multi-step TD: value prediction learning ---------------------------
 class TDnf(MRP):
     def init(self):
         self.store = True # must store because it is offline
@@ -644,7 +701,7 @@ class TDnf(MRP):
             # n steps τ+1,..., τ+n inclusive of both ends
             self.V[sτ] += self.α*(self.G(τ1,τn)+ (1- done)*self.γ**n *self.V[sn] - self.V[sτ])
 
-# -------------------- 🌖 online Sarsa: value control learning -----------------------------------------
+# --------------------  online Sarsa: value control learning -----------------------------------------
 class Sarsa(MDP()):
     def init(self): #α=.8
         self.step = self.step_an # for Sarsa we want to decide the next action in time step t
@@ -652,13 +709,13 @@ class Sarsa(MDP()):
     def online(self, s, rn,sn, done, a,an):
         self.Q[s,a] += self.α*(rn + (1- done)*self.γ*self.Q[sn,an] - self.Q[s,a])
 
-# -------------------- 🌖 online multi-step Sarsa: value control learning -------------------------------
+# --------------------  online multi-step Sarsa: value control learning -------------------------------
 class Sarsan(MDP()):
     def init(self):
         self.store = True        # although online but we need to access *some* of earlier steps,
         self.step = self.step_an # for Sarsa we want to decide the next action in time step t
     
-    # ----------------------------- 🌖 online learning ----------------------    
+    # -----------------------------  online learning ----------------------    
     def online(self,*args):
         τ = self.t - (self.n-1);  n=self.n
         if τ<0: return
@@ -674,12 +731,12 @@ class Sarsan(MDP()):
         # n steps τ+1,..., τ+n inclusive of both ends
         self.Q[sτ,aτ] += self.α*(self.G(τ1,τn) + (1- done)*self.γ**n *self.Q[sn,an] - self.Q[sτ,aτ])
 
-# -------------------- 🌖 online Q-learning: value control learning ------------------------------------
+# --------------------  online Q-learning: value control learning ------------------------------------
 class Qlearn(MDP()):
     def online(self, s, rn,sn, done, a,_):
         self.Q[s,a] += self.α*(rn + (1- done)*self.γ*self.Q[sn].max() - self.Q[s,a])
 
-# -------------------- 🌖 online Expected Sarsa: value control learning --------------------------------
+# --------------------  online Expected Sarsa: value control learning --------------------------------
 class XSarsa(MDP()):
     def online(self, s, rn,sn, done, a,_):      
         # obtain the ε-greedy policy probabilities, 
@@ -688,7 +745,7 @@ class XSarsa(MDP()):
         v = self.Q[sn].dot(π)
         self.Q[s,a] += self.α*(rn + (1- done)*self.γ*v - self.Q[s,a])
 
-# -------------------- 🌖 online double Q-learning: value control learning -------------------------------
+# --------------------  online double Q-learning: value control learning -------------------------------
 class DQlearn(MDP()):
     def init(self):
         self.Q1 = self.Q
@@ -703,7 +760,7 @@ class DQlearn(MDP()):
         if p:    self.Q1[s,a] += self.α*(rn + (1- done)*self.γ*self.Q2[sn].max() - self.Q1[s,a])
         else:    self.Q2[s,a] += self.α*(rn + (1- done)*self.γ*self.Q1[sn].max() - self.Q2[s,a])
 
-# -------------------- 🌖 online Actor-Critic: policy gradient 🧠 control learning ------------------------
+# --------------------  online Actor-Critic: policy gradient 易 control learning ------------------------
 class Actor_Critic(PG()):
     def step0(self):
         self.γt = 1 # powers of γ, must be reset at the start of each episode
